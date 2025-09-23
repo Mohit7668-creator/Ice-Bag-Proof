@@ -148,12 +148,12 @@ if st.button("Generate PDF Proof") and uploaded_file is not None and lines:
             line_height = font_size * 1.2
             y_cursor = text_top - font_size
 
-            # Center text horizontally
-            for ln in lines:
-                line_width = stringWidth(ln, font_regular if lines.index(ln) > 0 else font_bold, font_size)
+            # Center text horizontally, only first line bold
+            for i, ln in enumerate(lines):
+                line_width = stringWidth(ln, font_regular, font_size)
                 text_x = x0 + (box_w - line_width) / 2  # Center the text within the box
 
-                if lines.index(ln) == 0:
+                if i == 0:
                     c.setFont(font_bold, font_size)
                 else:
                     c.setFont(font_regular, font_size)
