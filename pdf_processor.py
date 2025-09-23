@@ -130,9 +130,8 @@ if st.button("Generate PDF Proof") and uploaded_file is not None and lines:
             c.setStrokeColorRGB(1, 0, 0)
             c.rect(x0, y0, x1 - x0, y1 - y0, stroke=1, fill=0)
 
-            # Text placement
+            # Text placement (centered horizontally)
             padding = 6
-            text_x = x0 + padding
             text_top = y1 - padding
             box_w = x1 - x0
             box_h = y1 - y0
@@ -148,12 +147,18 @@ if st.button("Generate PDF Proof") and uploaded_file is not None and lines:
 
             line_height = font_size * 1.2
             y_cursor = text_top - font_size
-            c.setFont(font_bold, font_size)
-            c.drawString(text_x, y_cursor, lines[0])
-            c.setFont(font_regular, font_size)
-            for ln in lines[1:]:
-                y_cursor -= line_height
+
+            # Center text horizontally
+            for ln in lines:
+                line_width = stringWidth(ln, font_regular if lines.index(ln) > 0 else font_bold, font_size)
+                text_x = x0 + (box_w - line_width) / 2  # Center the text within the box
+
+                if lines.index(ln) == 0:
+                    c.setFont(font_bold, font_size)
+                else:
+                    c.setFont(font_regular, font_size)
                 c.drawString(text_x, y_cursor, ln)
+                y_cursor -= line_height
 
             c.save()
             overlay_buffer.seek(0)
