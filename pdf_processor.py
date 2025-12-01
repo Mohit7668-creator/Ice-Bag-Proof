@@ -13,210 +13,180 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.units import inch
 
-# Input and output paths
-# Absolute path to your template
-template_path = Path("\Users\Mohit(MohitM)Mishra\Desktop\Ice Bag Automation\Template.pdf")
+# ==================== FIXED PATHS (No more UnicodeEscape Error) ====================
 
-# Always save in your Desktop/Pdf folder
+# Option 1: Agar aap local Windows pe run kar rahe ho → raw string use karo
+template_path = Path(r"C:\Users\Mohit(MohitM)Mishra\Desktop\Ice Bag Automation\Template.pdf")
+
+# Option 2: Agar Streamlit Cloud ya Linux/Mac pe deploy karoge → relative ya user-uploaded file use karna better hai
+# Lekin abhi ke liye local testing ke liye upar wala sahi hai
+
+# Output folder banao Desktop pe
 base_dir = Path.home() / "Desktop" / "Pdf"
-
-# Ensure the folder exists
 base_dir.mkdir(parents=True, exist_ok=True)
 
 output_overlay = base_dir / "overlay_text.pdf"
-final_output   = base_dir / "8lbPLWK_with_text.pdf"
-preview_png    = base_dir / "preview_page.png"
-
-
+final_output = base_dir / "8lbPLWK_with_text.pdf"
+preview_png = base_dir / "preview_page.png"
 
 # The text to insert (user provided)
 lines = ["Test Line 1", "Test Line 2", "Test Line 3"]
 
-# Try to open PDF and rasterize the first page to detect red box
+# ==================== Check if Template Exists ====================
+if not template_path.exists():
+    raise FileNotFoundError(f"Template PDF not found! Looking for: {template_path}")
+
+# ==================== Open PDF and detect red box ====================
 doc = fitz.open(str(template_path))
 page = doc.load_page(0)
-# render at zoom to get better resolution for detection
-zoom = 2  # 2x resolution for more accurate pixel detection
+
+# High resolution pixmap for accurate detection
+zoom = 2
 mat = fitz.Matrix(zoom, zoom)
 pix = page.get_pixmap(matrix=mat, alpha=False)
 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-# Save preview image for user
+# Save preview
 img.save(preview_png)
 
-# Convert to numpy for color detection
+# Convert to numpy array
 arr = np.array(img)
+r, g, b = arr[..., 0].astype(int), arr[..., 1].astype(int), arr[..., 2].astype(int)
 
-# Detect red pixels: R significantly larger than G and B and above a threshold
-r = arr[..., 0].astype(int)
-g = arr[..., 1].astype(int)
-b = arr[..., 2].astype(int)
-# Heuristic thresholds
+# Detect red box
 red_mask = (r > 150) & (r > g + 60) & (r > b + 60)
-
-# If no red found with strict threshold, relax it
 if red_mask.sum() < 50:
     red_mask = (r > 120) & (r > g + 40) & (r > b + 40)
 
 ys, xs = np.where(red_mask)
+
 if len(xs) == 0:
-    # Fall back: use a central 4"x2" box assumption (288x144 points) centered
+    # Fallback: center 4"x2" box
+    detected = False
     page_rect = page.rect
-    w_pts = page_rect.width
-    h_pts = page_rect.height
-    # 4"x2" in points (72 points per inch)
     box_w_pts = 4 * 72
     box_h_pts = 2 * 72
-    x0 = (w_pts - box_w_pts) / 2
-    y0 = (h_pts - box_h_pts) / 2
+    x0 = (page_rect.width - box_w_pts) / 2
+    y0 = (page_rect.height - box_h_pts) / 2
     x1 = x0 + box_w_pts
     y1 = y0 + box_h_pts
-    detected = False
 else:
     detected = True
-    # bounding box in image pixel coordinates
-    min_x = xs.min(); max_x = xs.max()
-    min_y = ys.min(); max_y = ys.max()
-    # Map image pixel coords back to PDF points
+    min_x, max_x = xs.min(), xs.max()
+    min_y, max_y = ys.min(), ys.max()
+
     img_w, img_h = img.size
-    page_rect = page.rect
-    page_w_pts = page_rect.width
-    page_h_pts = page_rect.height
-    # note: image y-axis starts at top; PDF coordinate starts at bottom.
-    # Convert pixel box to PDF points
+    page_w_pts = page.rect.width
+    page_h_pts = page.rect.height
+
     x0 = min_x * (page_w_pts / img_w)
-    x1 = (max_x) * (page_w_pts / img_w)
-    # for y, invert
-    y0 = page_h_pts - (max_y * (page_h_pts / img_h))
+    x1 = max_x * (page_w_pts / img_w)
+    y0 = page_h_pts - (max_y * (page_h_pts / img_h))   # PDF y=0 at bottom
     y1 = page_h_pts - (min_y * (page_h_pts / img_h))
 
-# Create overlay PDF with transparent background and desired text placed inside (vector text)
-# Try to register Arial from common system locations; fallback to Helvetica
-registered_fonts = {}
-def try_register(font_name, paths):
-    for p in paths:
-        p = Path(p)
-        if p.exists():
+# ==================== Font Registration (Arial fallback to Helvetica) ====================
+def try_register(font_name, possible_paths):
+    for p in possible_paths:
+        path = Path(p)
+        if path.exists():
             try:
-                pdfmetrics.registerFont(TTFont(font_name, str(p)))
+                pdfmetrics.registerFont(TTFont(font_name, str(path)))
                 return True
-            except Exception as e:
+            except:
                 continue
     return False
 
-# Common paths to check (Linux and macOS typical)
+# Common Arial locations (add Windows paths too for local testing)
 arial_paths = [
+    r"C:\Windows\Fonts\arial.ttf",
+    r"C:\Windows\Fonts\Arial.ttf",
     "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-    "/usr/share/fonts/truetype/arial/Arial.ttf",
     "/Library/Fonts/Arial.ttf",
-    "/Library/Fonts/Arial Bold.ttf",
-    "/usr/share/fonts/Arial.ttf",
-    "/usr/share/fonts/Arial/Arial.ttf",
 ]
 
 arial_bold_paths = [
+    r"C:\Windows\Fonts\arialbd.ttf",
+    r"C:\Windows\Fonts\Arialbd.ttf",
     "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
     "/Library/Fonts/Arial Bold.ttf",
-    "/usr/share/fonts/Arial/Arial Bold.ttf",
-    "/usr/share/fonts/truetype/Arial_Bold.ttf",
 ]
 
 have_arial = try_register("Arial", arial_paths)
 have_arial_bold = try_register("Arial-Bold", arial_bold_paths)
 
-# If Arial not available, use Helvetica (built-in)
 font_regular = "Arial" if have_arial else "Helvetica"
 font_bold = "Arial-Bold" if have_arial_bold else "Helvetica-Bold"
 
-# Create overlay
-from reportlab.lib.units import inch
-from reportlab.lib.pagesizes import landscape
-
+# ==================== Create Text Overlay PDF ====================
 packet = io.BytesIO()
-c = canvas.Canvas(packet, pagesize=(page_rect.width, page_rect.height))
+c = canvas.Canvas(packet, pagesize=(page.rect.width, page.rect.height))
 
-# For visual debugging (optional): draw a transparent rectangle border where text will be placed
+# Optional: debug red border
+c.setStrokeColorRGB(1, 0, 0)
 c.setLineWidth(1)
-c.setStrokeColorRGB(1,0,0)  # red border to show placement (will be vector)
-c.rect(x0, y0, x1-x0, y1-y0, stroke=1, fill=0)
+c.rect(x0, y0, x1 - x0, y1 - y0, stroke=1, fill=0)
 
-# Prepare text placement: start from top-left padding inside box
-padding = 6  # points padding inside box
-text_x = x0 + padding
-text_top = y1 - padding  # top position in PDF coords
-
-# Choose font sizes to fit inside box: dynamic sizing
+# Dynamic font sizing
+padding = 10
 box_w = x1 - x0
 box_h = y1 - y0
 
-# Determine a font size that allows 3 lines to fit comfortably
-# Start with 24 and reduce until fit
 from reportlab.pdfbase.pdfmetrics import stringWidth
-font_size = 24
-while font_size > 6:
-    # compute heights: approximate line height 1.2 * font_size
-    total_height = len(lines) * font_size * 1.2
-    max_line_width = max(stringWidth(ln, font_regular, font_size if i>0 else font_size) for i,ln in enumerate(lines))
-    if total_height <= (box_h - 2*padding) and max_line_width <= (box_w - 2*padding):
+
+font_size = 28
+while font_size > 8:
+    line_height = font_size * 1.2
+    total_h = len(lines) * line_height
+    max_w = max(stringWidth(line, font_regular if i > 0 else font_bold, font_size) for i, line in enumerate(lines))
+    if total_h <= (box_h - 2 * padding) and max_w <= (box_w - 2 * padding):
         break
     font_size -= 1
 
-# Draw lines: first line bold
-line_height = font_size * 1.2
-y_cursor = text_top - font_size  # baseline for first line
-# First line bold
+# Draw text
+text_x = x0 + padding
+y_cursor = y1 - padding - font_size  # first line baseline
+
 c.setFont(font_bold, font_size)
 c.drawString(text_x, y_cursor, lines[0])
-# remaining lines regular
+
 c.setFont(font_regular, font_size)
-for ln in lines[1:]:
+for line in lines[1:]:
     y_cursor -= line_height
-    c.drawString(text_x, y_cursor, ln)
+    c.drawString(text_x, y_cursor, line)
 
 c.save()
-
-# Move to beginning of the StringIO buffer
 packet.seek(0)
-new_pdf = PdfReader(packet)
-existing_pdf = PdfReader(str(template_path))
+
+# ==================== Merge Overlay with Original PDF ====================
+overlay_pdf = PdfReader(packet)
+original_pdf = PdfReader(str(template_path))
 writer = PdfWriter()
 
-# Merge overlay onto original page (vector)
-page0 = existing_pdf.pages[0]
-# PyPDF2 merging: merge_page expects PageObject; use .merge_page()? depending on version
-try:
-    # newer PyPDF2 has merge_page via PageObject
-    page0.merge_page(new_pdf.pages[0])
-except Exception as e:
-    # fallback approach: create writer with both pages (overlay second)
-    pass
-
+page0 = original_pdf.pages[0]
+page0.merge_page(overlay_pdf.pages[0])  # This works in modern PyPDF2
 writer.add_page(page0)
-# add remaining pages as-is
-for p in existing_pdf.pages[1:]:
+
+for p in original_pdf.pages[1:]:
     writer.add_page(p)
 
-# write out final PDF
-with open(final_output, "wb") as f_out:
-    writer.write(f_out)
+with open(final_output, "wb") as f:
+    writer.write(f)
 
-# Report results to the user
+# ==================== Final Result ====================
 result = {
-    "detected_red_box": bool(detected),
-    "overlay_path": str(output_overlay),
+    "detected_red_box": detected,
     "final_pdf": str(final_output),
     "preview_png": str(preview_png),
     "font_used": font_regular,
-    "font_bold": font_bold,
+    "font_bold_used": font_bold,
     "notes": ""
 }
 
-if not have_arial:
-    result["notes"] = "Arial not found on the execution host; Helvetica fallback used. If you need Arial embedded, upload Arial TTF files or I can provide instructions to embed fonts."
+if not have_arial or not have_arial_bold:
+    result["notes"] = "Arial not found on this system → using Helvetica fallback. Text is still crisp and vector!"
 
+print("PDF Proof generated successfully!")
 result
 
